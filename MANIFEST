@@ -1,0 +1,7 @@
+Changes
+Makefile.PL
+MANIFEST
+README
+t/POE-Filter-Stomp.t
+lib/POE/Filter/Stomp.pm
+META.yml                                 Module meta-data (added by MakeMaker)
