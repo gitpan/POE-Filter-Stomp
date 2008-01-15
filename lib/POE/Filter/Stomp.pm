@@ -22,117 +22,105 @@ use strict;
 use warnings;
 
 use Net::Stomp::Frame;
-use IO::String;
 
 use constant EOL => "\x0A";
 use constant EOF => "\000";
+my $eof = "\000";
+my $eol = qr(\012\015?);
+my $cntrl = qr((?:[[:cntrl:]])+);
 
-our $VERSION = '0.01';
+our $VERSION = '0.02';
 
 # ---------------------------------------------------------------------
 # Public methods
 # ---------------------------------------------------------------------
 
 sub new {
-	my $proto = shift;
+    my $proto = shift;
 
-	my $self = {};
-	my $class = ref($proto) || $proto;
+    my $self = {};
+    my $class = ref($proto) || $proto;
 
-	$self->{buffer} = [];
+    $self->{buffer} = "";
 
-	bless($self, $class);
+    bless($self, $class);
 
-	return $self;
+    return $self;
 
 }
 
 sub get_one_start {
-	my ($self, $buffers) = @_;
-	
-	$buffers = [$buffers] unless (ref($buffers));
-	push (@{$self->{buffer}}, @{$buffers});
-	
+    my ($self, $buffers) = @_;
+
+    $buffers = [$buffers] unless (ref($buffers));
+    $self->{buffer} .=  join('', @$buffers);
+
 }
 
 sub get_one {
-	my ($self) = shift;
+    my ($self) = shift;
 
-	my $frame;
-	my $buffer;
-	my $ret = [];
+    my $frame;
+    my $buffer;
+    my @ret;
 
-	if ($buffer = shift(@{$self->{buffer}})) {
+    $frame = $self->_parse_frame();
+    push(@ret, $frame) if ($frame);
 
-		$frame = $self->_parse_frame($buffer);
-		push(@$ret, $frame);
-
-	}
-
-	return $ret;
+    return \@ret;
 
 }
 
-sub get {
-	my ($self, $buffers) = @_;
+sub get_pending {
+    my ($self) = shift;
 
-	my $frame;
-	my $ret = [];
-
-	foreach my $buffer (@$buffers) {
-
-		$frame = $self->_parse_frame($buffer);
-		push (@$ret, $frame);
-
-	}
-
-	return $ret;
+    return($self->{buffer});
 
 }
 
 sub put {
-	my ($self, $frames) = @_;
+    my ($self, $frames) = @_;
 
-	my $string;
-	my $ret = [];
+    my $string;
+    my $ret = [];
 
-	foreach my $frame (@$frames) {
+    foreach my $frame (@$frames) {
 
-		# protocol spec is unclear about the case of the command,
-		# so uppercase the command, Why, just because I can.
-		
-		my $command = uc($frame->command);
-		my $headers = $frame->headers;
-		my $body = $frame->body;
+        # protocol spec is unclear about the case of the command,
+        # so uppercase the command, Why, just because I can.
 
-		$string = $command . EOL;
+        my $command = uc($frame->command);
+        my $headers = $frame->headers;
+        my $body = $frame->body;
 
-		if ($headers->{bytes_message}) {
+        $string = $command . EOL;
 
-			delete $headers->{bytes_message};
-			$headers->{'content-length'} = length($body);
+        if ($headers->{bytes_message}) {
 
-		}
+            delete $headers->{bytes_message};
+            $headers->{'content-length'} = length($body);
 
-		# protocol spec is unclear about spaces between headers and values
-		# nor the case of the header, so add a space and lowercase the 
-		# header. Why, just because I can.
+        }
 
-		while (my ($key, $value) = each %{$headers || {} }) {
+        # protocol spec is unclear about spaces between headers and values
+        # nor the case of the header, so add a space and lowercase the 
+        # header. Why, just because I can.
 
-			$string .= lc($key) . ': ' . $value . EOL;
+        while (my ($key, $value) = each %{$headers || {} }) {
 
-		}
+            $string .= lc($key) . ': ' . $value . EOL;
 
-		$string .= EOL;
-		$string .= $body || '';
-		$string .= EOF;
+        }
 
-		push (@$ret, $string);
+        $string .= EOL;
+        $string .= $body || '';
+        $string .= EOF;
 
-	}
+        push (@$ret, $string);
 
-	return $ret;
+    }
+
+    return $ret;
 
 }
 
@@ -141,67 +129,125 @@ sub put {
 # ---------------------------------------------------------------------
 
 sub _parse_frame {
-	my ($self, $buffer) = @_;
+    my ($self) = @_;
 
-	my $io = IO::String->new($buffer);
-	my $byte;
-	my $body;
-	my $holder;
-	my $headers;
-	my $command;
+    my $frame;
+    my $length;
+    my $clength;
 
-	# read the command
+    # check for a valid buffer, must have a EOL someplace
 
-	$command = $io->getline;
-	chop $command;
+    return () if ($self->{buffer} !~ /$eol/);
 
-	# read the headers
+    # read the command
 
-	while (1) {
+    if (! $self->{command}) {
 
-		$holder = $io->getline;
-		chop $holder;
-		last if ($holder eq "");
+        if ($self->{buffer} =~ s/^(.+?)$eol//s) {
 
-		my ($key, $value) = split(': ?', $holder, 2);
-		$headers->{$key} = $value;
+            my $command = $1;
+            $self->{command} = $command;
 
-	}
+        } else { return (); }
 
-	# read the body
-	#
-	# if "content-length" is defined then the body is binary, so
-    # create a "bytes_message" header to go along with the binary body.
-	# "bytes_message" is used internally and is not part of the protocol.
+    }
 
-	if ($headers->{'content-length'}) {
+    # read the headers, parse until a double new line, 
+    # punt if they are not found.
 
-		$io->read($body, $headers->{'content-length'});
-		$io->getc; # consume the EOF
-		$headers->{bytes_message} = 1;
+    if (! $self->{headers}) { 
 
-	} else {
+        $clength = index($self->{buffer}, EOL.EOL);
+        $clength = index($self->{buffer}, EOL.EOF) if ($clength == -1);
+        $length = length($self->{buffer});
 
-		# OK, no "content-length", so consume the buffer until EOF
-		# is found or end of buffer, whichever is first (malformed frame???).
+        return () if ($clength == -1);
 
-		my $length = length($buffer) - $io->tell;
+        if ($clength <= $length) {
 
-		for (my $x = 0; $x < $length; $x++) {
+            my %headers = ();
 
-			$byte = $io->getc;
-			last if ($byte eq EOF);
-			$body .= $byte;
+            while ($self->{buffer} =~ s/^(.+?)(?:$eol)//) {
 
-		}
+                my $line = $1;
 
-	}
+                if ($line =~ /^([\w\-~]+)\s*:\s*(.*)/) {
 
-	# create the frame
+                    $headers{$1} = $2;
 
-	return (Net::Stomp::Frame->new({command => $command,
-								   headers => $headers,
-                                   body => $body}));
+                }
+
+            }
+
+            $self->{headers} = \%headers;
+            $self->{buffer} =~ s/^$eol//;
+
+        } else { return (); }
+
+    }
+
+    # read the body
+    #
+    # if "content-length" is defined then the body is binary, 
+    # otherwise search the buffer until an EOF is found.
+
+    $clength = 0;
+    $length = length($self->{buffer});
+
+    if ($self->{headers}->{'content-length'}) {
+
+        $self->{headers}->{bytes_message} = 1;
+        $clength = $self->{headers}->{'content-length'};
+
+        if ($clength <= $length) {
+
+            $self->{body} = substr($self->{buffer}, 0, $clength);
+            substr($self->{buffer}, 0, $clength) = "";
+
+        } else { return (); }
+
+    } else { 
+
+        $clength = index($self->{buffer}, $eof);
+
+        return () if ($clength == -1);
+
+        if ($clength == 0) {
+
+            $self->{body} = " ";
+
+        } else {
+
+            $self->{body} = substr($self->{buffer}, 0, $clength);
+            substr($self->{buffer}, 0, $clength) = "";
+
+        }
+
+    }
+
+    # remove the crap from between the frames
+
+    $self->{buffer} =~ s/$cntrl//;
+
+    # create the frame
+
+    if ($self->{command} && $self->{headers} && $self->{body}) {
+
+        $frame = Net::Stomp::Frame->new(
+            {
+                command => $self->{command},
+                headers => $self->{headers},
+                body => $self->{body}
+            }
+        );
+
+        delete $self->{command};
+        delete $self->{headers};
+        delete $self->{body};
+
+    }
+
+    return $frame;
 
 }
 
@@ -240,9 +286,6 @@ This module is a filter for the POE environment. It will translate the input
 buffer into Net::Stomp::Frame objects and serialize the output buffer from 
 said objects. For more information an the STOMP protocol, please refer to: 
 http://stomp.codehaus.org/Protocol .
-
-This module supports both the get_one_start()/get_one() usage, along with 
-the older get() usage.
 
 =head1 EXPORT
 

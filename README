@@ -1,4 +1,4 @@
-POE-Filter-Stomp version 0.01
+POE-Filter-Stomp version 0.02
 =============================
 
 This module is a input/output filter for the POE environemt. It will parse 
@@ -18,8 +18,7 @@ DEPENDENCIES
 
 This module requires these other modules and libraries:
 
-Net::Stomp::Frame
-IO::String
+Net::Stomp
 
 COPYRIGHT AND LICENCE
 

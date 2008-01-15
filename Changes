@@ -1,6 +1,11 @@
 Revision history for Perl extension POE::Filter::Stomp.
 
 0.01  Thu Aug 30 09:31:05 2007
-	- original version; created by h2xs 1.23 with options
-		-Axc -n POE::Filter::Stomp
+      - original version; created by h2xs 1.23 with options
+      -Axc -n POE::Filter::Stomp
 
+0.02  17-Dec-2007 K.Esteb
+      Fixed the handling of large packets. The internal buffer was not being
+        handled properly and large packets would be terminated.
+      Added serveral tests, thanks lestrrat for providing the basic tests.
+      
