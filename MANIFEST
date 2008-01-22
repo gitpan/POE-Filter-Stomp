@@ -11,7 +11,6 @@ t/06_put_content.t
 t/07_pending.t
 t/08_nobody.t
 t/09_noheader.t
-t/99_pod-coverage.t
 t/99_pod.t
 lib/POE/Filter/Stomp.pm
 META.yml                                 Module meta-data (added by MakeMaker)

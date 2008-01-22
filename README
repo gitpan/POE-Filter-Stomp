@@ -1,4 +1,4 @@
-POE-Filter-Stomp version 0.02
+POE-Filter-Stomp version 0.03
 =============================
 
 This module is a input/output filter for the POE environemt. It will parse 
