@@ -6,11 +6,18 @@
 # This module will parse the input stream and create Net::Stomp::Frame 
 # objects from that input stream. A STOMP frame looks like this:
 #
-#    command<lf>
-#    headers<lf>
-#    <lf>
+#    command<newline>
+#    headers<newline>
+#    <newline>
 #    body
 #    \000
+#
+# notes for v0.04
+#
+# The protocol spec calls for "newline" as the EOL. All implementatons
+# are translating this into "\n". This is fine, except that "\n" has 
+# differing meanings depending on OS and/or language you are using. 
+# This complicated matters when parsing packets. 
 #
 # More information is located at http://stomp.codehaus.org/Protocol
 #
@@ -23,13 +30,19 @@ use warnings;
 
 use Net::Stomp::Frame;
 
-use constant EOL => "\x0A";
-use constant EOF => "\000";
-my $eof = "\000";
-my $eol = qr(\012\015?);
-my $cntrl = qr((?:[[:cntrl:]])+);
+our $VERSION = '0.04';
 
-our $VERSION = '0.03';
+# Be strick in what you send...
+
+use constant EOL => "\n";
+use constant EOF => "\000";
+
+# But lenient in what you recieve...
+
+my $eof = "\000";
+my $eol = qr((\015\012?|\012\015?|\015|\012));
+#my $eol = qr((\012|\015|\015\012?|\012\015?));
+my $cntrl = qr((?:[[:cntrl:]])+);
 
 # ---------------------------------------------------------------------
 # Public methods
@@ -128,6 +141,21 @@ sub put {
 # Private methods
 # ---------------------------------------------------------------------
 
+sub _read_line {
+    my ($self) = @_;
+
+    my $buffer;
+
+    if ($self->{buffer} =~ s/^(.+?)$eol//) {
+
+        $buffer = $1;
+
+    }
+
+    return $buffer;
+
+}
+
 sub _parse_frame {
     my ($self) = @_;
 
@@ -143,9 +171,8 @@ sub _parse_frame {
 
     if (! $self->{command}) {
 
-        if ($self->{buffer} =~ s/^(.+?)$eol//s) {
+        if (my $command = $self->_read_line()) {
 
-            my $command = $1;
             $self->{command} = $command;
 
         } else { return (); }
@@ -157,8 +184,17 @@ sub _parse_frame {
 
     if (! $self->{headers}) { 
 
-        $clength = index($self->{buffer}, EOL.EOL);
-        $clength = index($self->{buffer}, EOL.EOF) if ($clength == -1);
+        $self->{buffer} =~ m/$eol$eol/g;
+        $clength = pos($self->{buffer}) || -1;
+
+        if ($clength == -1) {
+
+            pos($self->{buffer}) = 0;
+            $self->{buffer} =~ m/$eol$eof/g;
+            $clength = pos($self->{buffer}) || -1;
+
+        }
+
         $length = length($self->{buffer});
 
         return () if ($clength == -1);
@@ -167,13 +203,11 @@ sub _parse_frame {
 
             my %headers = ();
 
-            while ($self->{buffer} =~ s/^(.+?)(?:$eol)//) {
-
-                my $line = $1;
+            while (my $line = $self->_read_line()) {
 
                 if ($line =~ /^([\w\-~]+)\s*:\s*(.*)/) {
 
-                    $headers{$1} = $2;
+                    $headers{lc($1)} = $2;
 
                 }
 
@@ -237,7 +271,7 @@ sub _parse_frame {
             {
                 command => $self->{command},
                 headers => $self->{headers},
-                body => $self->{body}
+                body    => $self->{body}
             }
         );
 
@@ -254,7 +288,6 @@ sub _parse_frame {
 1;
 
 __END__
-# Below is stub documentation for your module. You'd better edit it!
 
 =head1 NAME
 

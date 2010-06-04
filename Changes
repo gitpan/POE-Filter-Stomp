@@ -13,3 +13,8 @@ Revision history for Perl extension POE::Filter::Stomp.
       Removed the test for pod-coverage. I don't use that style for writting
         documentation. Fixes a problem reported by the perl testers.
 
+0.04  08-Apr-2010 K.Esteb
+      Naveed Massjouni came across an issue with transfering frames between
+       different OS's, specifically Windows and Unix. This release addresses 
+       that problem.
+
